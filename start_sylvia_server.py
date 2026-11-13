@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import logging
 import logging.handlers
@@ -19,6 +20,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import wave
 from dataclasses import dataclass
 from datetime import datetime
 from importlib import metadata as importlib_metadata
@@ -43,6 +45,7 @@ DESIGN_ROLE = "design"
 VALID_MODEL_TYPES = ("base", "voice_design", "custom_voice")
 LOG_DIR = ROOT / "logs"
 LOGGER = logging.getLogger("sylvia.server")
+NOWINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # Device-independent server flags; device-specific ones come from
 # .config/models.json -> device_profiles[device].flags
@@ -90,6 +93,8 @@ class Catalog:
     codecs: dict[str, Path]
     device_profiles: dict[str, tuple[str, ...]]
     default_device: str
+    reference_shape: dict
+    reference_target: dict
 
     def for_role(self, role: str, *, available_only: bool = True) -> list[Talker]:
         models = [model for model in self.talkers.values() if role in model.roles]
@@ -259,6 +264,8 @@ def _load_catalog() -> Catalog:
         codecs=codecs,
         device_profiles=device_profiles,
         default_device=default_device,
+        reference_shape=raw.get("reference_shape") or {},
+        reference_target=raw.get("reference_target") or {},
     )
 
 
@@ -358,7 +365,8 @@ def _probe_backend(backend: Backend) -> tuple[bool, str]:
     )
     try:
         result = subprocess.run(
-            [str(python), "-c", probe], capture_output=True, text=True, timeout=120
+            [str(python), "-c", probe], capture_output=True, text=True, timeout=120,
+            creationflags=NOWINDOW,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, f"probe failed: {exc}"
@@ -387,6 +395,7 @@ def _log_gpu_memory() -> None:
             capture_output=True,
             text=True,
             timeout=15,
+            creationflags=NOWINDOW,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         LOGGER.warning("gpu memory probe failed: %s", exc)
@@ -472,7 +481,7 @@ def _reexec(backend: Backend, resolved: list[str], args: argparse.Namespace) -> 
     argv.extend(("--log-level", args.log_level))
     LOGGER.info("handing off to %s server: %s", backend.device, python)
     LOGGER.debug("handoff argv: %s", argv)
-    return subprocess.call(argv, cwd=str(ROOT))
+    return subprocess.call(argv, cwd=str(ROOT), creationflags=NOWINDOW)
 
 
 def _gpu_present() -> bool:
@@ -482,6 +491,7 @@ def _gpu_present() -> bool:
             capture_output=True,
             text=True,
             timeout=15,
+            creationflags=NOWINDOW,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         LOGGER.warning("nvidia-smi unavailable: %s", exc)
@@ -718,7 +728,70 @@ def _wait_until_ready(process: subprocess.Popen[Any], port: int) -> None:
     raise TimeoutError("VoiceDesign server did not become ready within 30 minutes")
 
 
-def _generate_reference(script: str, model: Talker, device_flags: tuple[str, ...], device: str) -> bytes:
+def _voice_metrics(wav_bytes: bytes) -> dict:
+    """F0 median + spectral centroid of a WAV, for matching a target voice."""
+    try:
+        import numpy as np
+    except Exception:
+        return {}
+    try:
+        with wave.open(io.BytesIO(wav_bytes), "rb") as reader:
+            rate = reader.getframerate()
+            channels = reader.getnchannels()
+            frames = reader.readframes(reader.getnframes())
+        signal = np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768.0
+        if channels > 1:
+            signal = signal.reshape(-1, channels).mean(axis=1)
+    except Exception:
+        return {}
+
+    frame, hop = int(rate * 0.04), int(rate * 0.01)
+    lo, hi = int(rate / 450.0), int(rate / 70.0)
+    pitches = []
+    for start in range(0, max(1, len(signal) - frame), hop):
+        chunk = signal[start:start + frame]
+        if float(np.sqrt(np.mean(chunk ** 2))) < 0.01:
+            continue
+        chunk = chunk - chunk.mean()
+        corr = np.correlate(chunk, chunk, mode="full")[frame - 1:]
+        if corr[0] <= 0:
+            continue
+        corr /= corr[0]
+        window = corr[lo:hi]
+        if not len(window):
+            continue
+        peak = int(np.argmax(window)) + lo
+        if corr[peak] >= 0.3:
+            pitches.append(rate / peak)
+
+    seg = signal[: rate * 5]
+    spec = np.abs(np.fft.rfft(seg))
+    freqs = np.fft.rfftfreq(len(seg), 1 / rate)
+    centroid = float((freqs * spec).sum() / spec.sum()) if spec.sum() else 0.0
+    f0 = float(np.median(pitches)) if pitches else 0.0
+    return {"f0_hz": round(f0, 1), "centroid_hz": round(centroid), "voiced": len(pitches)}
+
+
+def _voice_score(metrics: dict, target: dict) -> float:
+    if not metrics:
+        return 0.0
+    f0_target = float(target.get("f0_hz") or 0) or None
+    cent_target = float(target.get("centroid_hz") or 0) or None
+    score = 0.0
+    if f0_target and metrics.get("f0_hz"):
+        score += abs(metrics["f0_hz"] - f0_target)
+    if cent_target and metrics.get("centroid_hz"):
+        score += abs(metrics["centroid_hz"] - cent_target) / 10.0
+    return score
+
+
+def _generate_reference(
+    script: str,
+    model: Talker,
+    device_flags: tuple[str, ...],
+    device: str,
+    shape: dict | None = None,
+) -> bytes:
     _assert_port_free(DESIGN_PORT)
     command = _server_command(
         model,
@@ -733,7 +806,7 @@ def _generate_reference(script: str, model: Talker, device_flags: tuple[str, ...
     process = subprocess.Popen(
         command,
         cwd=ROOT,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | NOWINDOW,
     )
     try:
         _wait_until_ready(process, DESIGN_PORT)
@@ -763,6 +836,12 @@ def _generate_reference(script: str, model: Talker, device_flags: tuple[str, ...
             raise RuntimeError(f"VoiceDesign request failed (HTTP {exc.code}): {detail}") from exc
         if not audio:
             raise RuntimeError("VoiceDesign returned an empty WAV")
+        if shape:
+            from voice_shape import shape_wav
+
+            audio, shape_stats = shape_wav(audio, shape)
+            LOGGER.info("reference timbre shaped: %s", shape_stats)
+            print(f"Reference timbre shaped: {shape_stats.get('bands')}")
         LOGGER.info(
             "design stage produced %s bytes in %.1fs",
             len(audio),
@@ -786,7 +865,7 @@ def _stop_stage_server(process: subprocess.Popen[Any]) -> None:
             "-Command",
             f"Stop-Process -Id {process.pid} -Force",
         ]
-        subprocess.run(command, check=True)
+        subprocess.run(command, check=True, creationflags=NOWINDOW)
         process.wait(timeout=15)
     print("VoiceDesign stage stopped; releasing its model memory.")
 
@@ -903,7 +982,27 @@ def main() -> int:
         print("\nPipeline: design the reference, then serve it.")
         _print_command("Serve command", serve_command)
         started = time.monotonic()
-        reference = _generate_reference(script, design_model, device_flags, backend.device)
+        reference = _generate_reference(script, design_model, device_flags, backend.device, catalog.reference_shape)
+        target = catalog.reference_target
+        candidates = max(1, int(target.get("candidates") or 1))
+        if candidates > 1:
+            best_reference, best_score = reference, _voice_score(_voice_metrics(reference), target)
+            LOGGER.info(
+                "reference candidate 1/%s: %s score=%.1f",
+                candidates, _voice_metrics(reference), best_score,
+            )
+            for index in range(2, candidates + 1):
+                trial = _generate_reference(script, design_model, device_flags, backend.device, catalog.reference_shape)
+                metrics = _voice_metrics(trial)
+                score = _voice_score(metrics, target)
+                LOGGER.info("reference candidate %s/%s: %s score=%.1f", index, candidates, metrics, score)
+                if score < best_score:
+                    best_reference, best_score = trial, score
+            reference = best_reference
+            LOGGER.info(
+                "kept best reference (score %.1f, target %s): %s",
+                best_score, target, _voice_metrics(reference),
+            )
         _save_and_register_reference(reference, script)
         LOGGER.info("reference pipeline finished in %.1fs", time.monotonic() - started)
     else:
@@ -929,7 +1028,7 @@ def main() -> int:
         f"\nStarting {serve_model.label} {serve_model.quant} (codec {serve_model.codec_quant}) "
         f"on {backend.device.upper()} with the Sylvia voice..."
     )
-    exit_code = subprocess.call(serve_command, cwd=ROOT)
+    exit_code = subprocess.call(serve_command, cwd=ROOT, creationflags=NOWINDOW)
     LOGGER.info("server exited with code %s", exit_code)
     if exit_code != 0:
         LOGGER.error("check the log above for the server's own diagnostics: %s", log_path)

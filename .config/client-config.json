@@ -1,0 +1,66 @@
+{
+  "received_at": "2026-11-13T17:42:33",
+  "config": {
+    "upstreams": [
+      "127.0.0.1:2558",
+      "127.0.0.1:2258",
+      "100.107.87.33:2558",
+      "100.107.87.33:2258"
+    ],
+    "voice": "sylvia",
+    "server_control": "http://127.0.0.1:2557",
+    "listen": {
+      "host": "127.0.0.1",
+      "port": 8765
+    },
+    "limits": {
+      "max_concurrent": 1,
+      "max_queue": 8,
+      "queue_timeout": 600,
+      "request_timeout": 420,
+      "connect_timeout": 5,
+      "probe_timeout": 2.5
+    },
+    "cache": {
+      "enabled": true,
+      "dir": "cache",
+      "max_mb": 512,
+      "max_entries": 4000
+    },
+    "sampling": {
+      "max_new_tokens_per_char": 2.25,
+      "max_new_tokens_floor": 120,
+      "max_new_tokens_ceiling": 3000
+    },
+    "normalize": {
+      "enabled": true,
+      "use_hermes_normalizer": true,
+      "strip_barge_in_note": true,
+      "strip_thinking": true,
+      "strip_code": true,
+      "strip_urls": true,
+      "strip_emojis": true,
+      "strip_markdown": true,
+      "max_chars": 4000
+    },
+    "audio": {
+      "volume_db": 0.0,
+      "limiter": true,
+      "eq": {
+        "low_shelf": {
+          "freq": 120.0,
+          "gain_db": 0.0
+        },
+        "peak": {
+          "freq": 2500.0,
+          "gain_db": 0.0,
+          "q": 1.0
+        },
+        "high_shelf": {
+          "freq": 6000.0,
+          "gain_db": 0.0
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "device": "gpu",
+  "model": "0.6b-base-q8",
+  "design_model": "1.7b-voicedesign-bf16",
+  "new_reference": false
+}

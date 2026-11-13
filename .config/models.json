@@ -116,5 +116,15 @@
   "defaults": {
     "serve": "0.6b-base-q8",
     "design": "1.7b-voicedesign-q4"
+  },
+  "reference_shape": {
+    "low_shelf": {"freq": 200.0, "gain_db": 3.0},
+    "peak": {"freq": 900.0, "gain_db": 2.0, "q": 0.8},
+    "high_shelf": {"freq": 3000.0, "gain_db": -9.0}
+  },
+  "reference_target": {
+    "f0_hz": 218.0,
+    "centroid_hz": 1200.0,
+    "candidates": 3
   }
 }
