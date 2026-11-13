@@ -1,5 +1,7 @@
 .venv/
+.venv-gpu/
 __pycache__/
 voices/
 reference/
 archive-reference/
+logs/

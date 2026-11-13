@@ -2,30 +2,39 @@
 setlocal
 cd /d "%~dp0"
 
-set "MODEL_DIR=D:\Shared\GGUF\Serveurperso\Qwen3-TTS-GGUF"
-set "PYTHON=.venv\Scripts\python.exe"
+rem Single entry point: asks for the server type (cpu / gpu), then the model to serve.
+rem Server types: cpu -> .venv (realtimetts-qwen-native-cpu), gpu -> .venv-gpu (CUDA).
+rem Run Setup-TTS-GPU.bat once to create the GPU environment.
+
 set "REALTIMETTS_API_KEY="
 
-if not exist "%PYTHON%" (
-    echo Creating Python 3.12 virtual environment...
-    py -3.12 -m venv .venv
-    if errorlevel 1 goto failed
+if exist ".venv\Scripts\python.exe" (
+    set "PYTHON=.venv\Scripts\python.exe"
+) else if exist ".venv-gpu\Scripts\python.exe" (
+    set "PYTHON=.venv-gpu\Scripts\python.exe"
+) else (
+    set "PYTHON=.venv\Scripts\python.exe"
 )
 
-if not exist ".venv\Scripts\realtimetts-qwen-server.exe" (
+if not exist "%PYTHON%" (
+    echo Creating Python 3.12 CPU virtual environment...
+    py -3.12 -m venv .venv
+    if errorlevel 1 goto failed
+    set "PYTHON=.venv\Scripts\python.exe"
     echo Installing RealtimeTTS CPU server...
     "%PYTHON%" -m pip install "realtimetts[qwen-cpu-server]"
     if errorlevel 1 goto failed
 )
 
 echo.
-echo First-time setup: run Setup-TTS.bat once; missing setup is also automatic.
-echo Startup pipeline: reuse Sylvia's reference or generate it with 1.7B VoiceDesign,
-echo then serve it with 0.6B Base Q4_K_M by default.
-echo CPU worker pools: 6 generation + 6 codec threads; no core pinning.
-echo Request limit: 1 active synthesis, no queued requests.
-echo Pass --Q8 to serve with the 0.6B Base Q8 model instead.
-echo VoiceDesign defaults to Q4_K_M; pass --bf16 to select BF16 assets.
+echo Launcher: %PYTHON%
+echo Models:   .config\models.json  (F:\LLM\Serveurperso\Qwen3-TTS-GGUF)
+echo Logs:     logs\sylvia-server-YYYYMMDD.log
+echo.
+echo You will be asked for the server type, then the model to serve.
+echo Flags: --list catalog, --model ^<id^>, --device cpu^|gpu, --dry-run, --yes, -new
+echo CPU worker pools: 6 generation + 6 codec threads. Request limit: 1 active, none queued.
+echo GPU mode needs Setup-TTS-GPU.bat once; it is offered automatically when installed.
 echo Existing reference is reused; pass -new to archive it and generate another.
 echo API authentication is disabled; restrict access with Windows Firewall.
 echo Studio: http://127.0.0.1:2558/studio
@@ -44,6 +53,6 @@ exit /b 0
 
 :failed
 echo.
-echo Startup failed. Check the message above.
+echo Startup failed. Check the message above and logs\sylvia-server-*.log
 pause
 exit /b 1

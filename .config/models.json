@@ -1,0 +1,120 @@
+{
+  "version": 2,
+  "_comment": [
+    "GGUF model catalog for the Sylvia TTS server (RealtimeTTS / Qwen3-TTS).",
+    "Paths in 'file' are relative to 'models_root'. 'models_root' may be absolute or",
+    "relative to the realtime-tts-server directory. Entries with \"optional\": true are",
+    "documented slots: they are listed as MISSING until the file is dropped in place.",
+    "roles: serve = usable by --model for the HTTP server, design = usable to generate",
+    "the Sylvia reference via VoiceDesign.",
+    "device_profiles hold the native flags per device; default_device 'auto' picks gpu",
+    "when the CUDA runtime is installed (Start-TTS-GPU.bat), cpu otherwise (Start-TTS.bat)."
+  ],
+  "models_root": "F:/LLM/Serveurperso/Qwen3-TTS-GGUF",
+  "voices_dir": "voices",
+  "default_device": "auto",
+  "device_profiles": {
+    "cpu": {
+      "flags": [
+        "--device", "cpu",
+        "--cpu-threads", "6",
+        "--cpu-codec-threads", "6",
+        "--cpu-stream-frames", "1",
+        "--cpu-fused-attention",
+        "--startup-buffer-ms", "80"
+      ]
+    },
+    "gpu": {
+      "flags": [
+        "--device", "gpu",
+        "--startup-buffer-ms", "80"
+      ]
+    }
+  },
+  "codecs": {
+    "Q4_K_M": {
+      "file": "qwen-tokenizer-12hz-Q4_K_M.gguf",
+      "note": "smallest codec, matches Q4 talkers"
+    },
+    "Q8_0": {
+      "file": "qwen-tokenizer-12hz-Q8_0.gguf",
+      "note": "near-lossless codec, ~1.1x Q4 size"
+    },
+    "BF16": {
+      "file": "qwen-tokenizer-12hz-BF16.gguf",
+      "note": "reference codec quality, ~1.4x Q4 size"
+    }
+  },
+  "talkers": [
+    {
+      "id": "0.6b-base-q4",
+      "label": "Qwen3-TTS 0.6B Base",
+      "model_type": "base",
+      "file": "qwen-talker-0.6b-base-Q4_K_M.gguf",
+      "quant": "Q4_K_M",
+      "codec": "Q4_K_M",
+      "alias": "qwen3-tts-0.6b-base-q4-sylvia",
+      "roles": ["serve"],
+      "note": "default; voice cloning from the sylvia reference, fastest on CPU"
+    },
+    {
+      "id": "1.7b-base-q4",
+      "label": "Qwen3-TTS 1.7B Base",
+      "model_type": "base",
+      "file": "qwen-talker-1.7b-base-Q4_K_M.gguf",
+      "quant": "Q4_K_M",
+      "codec": "Q4_K_M",
+      "alias": "qwen3-tts-1.7b-base-q4-sylvia",
+      "roles": ["serve"],
+      "note": "voice cloning; better prosody than 0.6B, roughly 3x slower on CPU"
+    },
+    {
+      "id": "1.7b-customvoice-q4",
+      "label": "Qwen3-TTS 1.7B CustomVoice",
+      "model_type": "custom_voice",
+      "file": "qwen-talker-1.7b-customvoice-Q4_K_M.gguf",
+      "quant": "Q4_K_M",
+      "codec": "Q4_K_M",
+      "alias": "qwen3-tts-1.7b-customvoice-q4-sylvia",
+      "roles": ["serve"],
+      "note": "preset speakers + instructions; no reference cloning"
+    },
+    {
+      "id": "1.7b-voicedesign-q4",
+      "label": "Qwen3-TTS 1.7B VoiceDesign",
+      "model_type": "voice_design",
+      "file": "qwen-talker-1.7b-voicedesign-Q4_K_M.gguf",
+      "quant": "Q4_K_M",
+      "codec": "Q4_K_M",
+      "alias": "sylvia-voice-design-stage",
+      "roles": ["design"],
+      "note": "designs a voice from .config/voice-profile.txt; used to build the reference"
+    },
+    {
+      "id": "0.6b-base-q8",
+      "label": "Qwen3-TTS 0.6B Base",
+      "model_type": "base",
+      "file": "qwen-talker-0.6b-base-Q8_0.gguf",
+      "quant": "Q8_0",
+      "codec": "Q8_0",
+      "alias": "qwen3-tts-0.6b-base-q8-sylvia",
+      "roles": ["serve"],
+      "note": "0.6B at near-lossless precision; safe default for GPU and CPU"
+    },
+    {
+      "id": "1.7b-voicedesign-bf16",
+      "label": "Qwen3-TTS 1.7B VoiceDesign",
+      "model_type": "voice_design",
+      "file": "qwen-talker-1.7b-voicedesign-BF16.gguf",
+      "quant": "BF16",
+      "codec": "BF16",
+      "alias": "sylvia-voice-design-stage",
+      "roles": ["design"],
+      "note": "highest-fidelity reference builder, 3.6 GB; needs GPU (fits 8 GB VRAM)"
+    }
+  ],
+  "defaults": {
+    "serve": "0.6b-base-q8",
+    "design": "1.7b-voicedesign-q4"
+  }
+}
