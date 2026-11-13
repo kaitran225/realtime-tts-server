@@ -19,6 +19,7 @@ if not exist ".venv\Scripts\realtimetts-qwen-server.exe" (
 )
 
 echo.
+echo First-time setup: run Setup-TTS.bat once; missing setup is also automatic.
 echo Startup pipeline: reuse Sylvia's reference or generate it with 1.7B VoiceDesign,
 echo then serve it with 0.6B Base Q4_K_M by default.
 echo CPU worker pools: 6 generation + 6 codec threads; no core pinning.
